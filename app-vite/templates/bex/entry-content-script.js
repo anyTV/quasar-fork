@@ -13,29 +13,34 @@ import Bridge from './bridge'
 import { listenForWindowEvents } from './window-event-listener'
 import runDevlandContentScript from '../../src-bex/__NAME__'
 
-const port = chrome.runtime.connect({
-  name: 'contentScript'
-})
-
-let disconnected = false
-port.onDisconnect.addListener(() => {
-  disconnected = true
-})
-
+let port
+let wall_fn
 let bridge = new Bridge({
+  // only used by bridge in constructor, only 1 fn is ever listened on
   listen (fn) {
-    port.onMessage.addListener(fn)
+    wall_fn = fn
   },
   send (data) {
-    if (!disconnected) {
-      port.postMessage(data)
-      window.postMessage({
-        ...data,
-        from: 'bex-content-script'
-      }, '*')
-    }
+    port.postMessage(data)
+    window.postMessage({
+      ...data,
+      from: 'bex-content-script'
+    }, '*')
   }
 })
+
+function connect() {
+  port = chrome.runtime.connect({
+    name: 'contentScript'
+  })
+
+  // auto reconnect on disconnect
+  port.onDisconnect.addListener(connect)
+
+  // setup wall fn listener
+  port.onMessage.addListener(wall_fn)
+}
+connect()
 
 // Inject our dom script for communications.
 function injectScript (url) {
