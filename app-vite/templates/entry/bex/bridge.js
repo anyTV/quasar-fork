@@ -25,8 +25,16 @@ export default class Bridge extends EventEmitter {
 
     this.setMaxListeners(Infinity)
     this.wall = wall
+    this.setup_message_handlers()
 
-    wall.listen(messages => {
+    this._sendingQueue = []
+    this._sending = false
+    this._maxMessageSize = 32 * 1024 * 1024 // 32mb
+  }
+
+  setup_message_handlers () {
+    // wall.listen is expected to set message handler on all connections
+    this.wall.listen(messages => {
       if (Array.isArray(messages)) {
         messages.forEach(message => this._emit(message))
       }
@@ -34,10 +42,6 @@ export default class Bridge extends EventEmitter {
         this._emit(messages)
       }
     })
-
-    this._sendingQueue = []
-    this._sending = false
-    this._maxMessageSize = 32 * 1024 * 1024 // 32mb
   }
 
   /**

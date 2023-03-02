@@ -72,6 +72,46 @@ const removeConnection = (connectionId, port) => {
   }
 }
 
+
+/**
+ * Create a comms layer between the background script and the App / ContentScript
+ * Note: This hooks into all connections as the background script should be able to send
+ * messages to all apps / content scripts within its realm (the BEX)
+ * @type {Bridge}
+ */
+const bridge = new Bridge({
+  listen (fn) {
+    for (let connectionId in connections) {
+      const connection = connections[connectionId]
+      if (connection.app && !connection.app.listening) {
+        connection.app.listening = true
+        connection.app.port.onMessage.addListener(fn)
+      }
+
+      if (connection.contentScript && !connection.contentScript.listening) {
+        connection.contentScript.port.onMessage.addListener(fn)
+        connection.contentScript.listening = true
+      }
+    }
+  },
+  send (data) {
+    const targetConnectionId = data?.[0]?.payload?.data?.connectionId
+    const send_data = (connection) => {
+      connection.app && connection.app.connected && connection.app.port.postMessage(data)
+      connection.contentScript && connection.contentScript.connected && connection.contentScript.port.postMessage(data)
+    }
+
+    // only send to specific connection if connectionId is specified
+    if (targetConnectionId && connections[targetConnectionId]) {
+      send_data(connections[targetConnectionId])
+      return
+    }
+    for (let connectionId in connections) {
+      send_data(connections[connectionId])
+    }
+  }
+})
+
 chrome.runtime.onConnect.addListener(port => {
   // Add this port to our pool of connections
   const thisConnection = addConnection(port)
@@ -79,46 +119,7 @@ chrome.runtime.onConnect.addListener(port => {
     removeConnection(thisConnection.connectionId, port)
   })
 
-  /**
-   * Create a comms layer between the background script and the App / ContentScript
-   * Note: This hooks into all connections as the background script should be able to send
-   * messages to all apps / content scripts within its realm (the BEX)
-   * @type {Bridge}
-   */
-  const bridge = new Bridge({
-    listen (fn) {
-      for (let connectionId in connections) {
-        const connection = connections[connectionId]
-        if (connection.app && !connection.app.listening) {
-          connection.app.listening = true
-          connection.app.port.onMessage.addListener(fn)
-        }
-
-        if (connection.contentScript && !connection.contentScript.listening) {
-          connection.contentScript.port.onMessage.addListener(fn)
-          connection.contentScript.listening = true
-        }
-      }
-    },
-    send (data) {
-      const targetConnectionId = data?.[0]?.payload?.data?.connectionId
-      const send_data = (connection) => {
-        connection.app && connection.app.connected && connection.app.port.postMessage(data)
-        connection.contentScript && connection.contentScript.connected && connection.contentScript.port.postMessage(data)
-      }
-
-      // only send to specific connection if connectionId is specified
-      if (targetConnectionId && connections[targetConnectionId]) {
-        send_data(connections[targetConnectionId])
-        return
-      }
-      for (let connectionId in connections) {
-        send_data(connections[connectionId])
-      }
-    }
-  })
-
-  runDevlandBackgroundScript(bridge, connections)
+  bridge.setup_message_handlers()
 
   // reconnect current port every 295 seconds - https://stackoverflow.com/a/66618269
   function forceReconnect(port) {
@@ -130,3 +131,5 @@ chrome.runtime.onConnect.addListener(port => {
   }
   port._timer = setTimeout(forceReconnect, 250e3, port)
 })
+
+runDevlandBackgroundScript(bridge, connections)
