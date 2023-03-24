@@ -1,6 +1,6 @@
 
 const { join } = require('path')
-const { createWriteStream } = require('fs-extra')
+const { createWriteStream, mkdirpSync } = require('fs-extra')
 const archiver = require('archiver')
 
 const AppBuilder = require('../../app-builder')
@@ -9,8 +9,11 @@ const { progress } = require('../../helpers/logger')
 const config = require('./bex-config')
 const { createManifest, copyBexAssets } = require('./utils')
 
-const { name } = require(appPaths.resolve.app('package.json'))
+const { name, version } = require(appPaths.resolve.app('package.json'))
 
+const env = (process.env.BUILD_FOR
+  ? process.env.BUILD_FOR
+  : process.env.NODE_ENV) || 'staging';
 class BexBuilder extends AppBuilder {
   async build () {
     const viteConfig = await config.vite(this.quasarConf)
@@ -32,13 +35,17 @@ class BexBuilder extends AppBuilder {
 
     copyBexAssets(this.quasarConf)
 
+    const zipDir = this.quasarConf.build.zipDir ||  this.quasarConf.build.distDir
+
+    mkdirpSync(zipDir)
+
     this.printSummary(this.quasarConf.build.distDir)
-    this.#bundlePackage(this.quasarConf.build.distDir)
+    this.#bundlePackage(this.quasarConf.build.distDir, zipDir)
   }
 
-  #bundlePackage (folder) {
+  #bundlePackage (srcFolder, outFolder) {
     const done = progress('Bundling in progress...')
-    const file = join(folder, `Packaged.${ name }.zip`)
+    const file = join(outFolder, `${name}-v${version}-${env}.zip`)
 
     let output = createWriteStream(file)
     let archive = archiver('zip', {
@@ -46,7 +53,7 @@ class BexBuilder extends AppBuilder {
     })
 
     archive.pipe(output)
-    archive.directory(folder, false)
+    archive.directory(srcFolder, false)
     archive.finalize()
 
     done(`Bundle has been generated at: ${file}`)
