@@ -243,7 +243,7 @@ async function start ({
         shellConnect(bridge => {
           window.QBexBridge = bridge
           app.config.globalProperties.$q.bex = window.QBexBridge
-          app.mount('#q-app')
+          app.mount('#q-app-bex')
         })
       }
 

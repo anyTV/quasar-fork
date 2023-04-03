@@ -81,11 +81,15 @@ module.exports.transformHtml = function (template, quasarConf) {
   const compiled = compileTemplate(template)
 
   let html = compiled(quasarConf.htmlVariables)
+  let replacer = quasarConf.ctx.mode.ssr
+    ? entryPointMarkup
+    : quasarConf.ctx.mode.bex
+      ? '<div id="q-app-bex"></div>'
+      : attachMarkup
 
   html = html.replace(
     entryPointMarkup,
-    (quasarConf.ctx.mode.ssr === true ? entryPointMarkup : attachMarkup)
-      + entryScript
+    replacer + entryScript
   )
 
   // publicPath will be handled by Vite middleware
