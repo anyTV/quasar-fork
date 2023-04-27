@@ -183,28 +183,35 @@ async function start ({
     <% } %>
 
     <% if (ctx.mode.bex) { %>
+      let appId
+      let port
+      let wall_fn
+      let bridge = new BexBridge({
+        // only used by bridge in constructor, only 1 fn is ever listened on
+        listen (fn) {
+          wall_fn = fn
+        },
+        send (data) {
+          port.postMessage(data)
+        }
+      })
+
+      function init_connect() {
+        port = chrome.runtime.connect({
+          name: 'app:' + appId
+        })
+
+        // auto reconnect on disconnect
+        port.onDisconnect.addListener(init_connect)
+
+        // setup wall fn listener
+        port.onMessage.addListener(wall_fn)
+      }
+
       function connect () {
         const buildConnection = (id, cb) => {
-          const port = chrome.runtime.connect({
-            name: 'app:' + id
-          })
-
-          let disconnected = false
-          port.onDisconnect.addListener(() => {
-            disconnected = true
-          })
-
-          let bridge = new BexBridge({
-            listen (fn) {
-              port.onMessage.addListener(fn)
-            },
-            send (data) {
-              if (!disconnected) {
-                port.postMessage(data)
-              }
-            }
-          })
-
+          appId = id
+          init_connect()
           cb(bridge)
         }
 

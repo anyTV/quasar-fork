@@ -146,6 +146,11 @@ async function build () {
   let outputFolder = quasarConf.build.distDir
   artifacts.clean(outputFolder)
 
+  let zipFolder = quasarConf.build.zipDir || outputFolder
+  if (argv.mode === 'bex') {
+    artifacts.clean(zipFolder);
+  }
+
   const entryFiles = require('../entry-files-generator')(ctx)
   entryFiles.generate(quasarConf)
 
@@ -159,17 +164,25 @@ async function build () {
     await hook.fn(hook.api, { quasarConf })
   })
 
+  const banner_conf = {
+    target: quasarConf.build.target
+  }
+
   appBuilder.build().then(async () => {
     artifacts.add(outputFolder)
+
+    if (argv.mode === 'bex') {
+      artifacts.add(zipFolder)
+      banner_conf.archiveOutputFolder = zipFolder
+    }
 
     outputFolder = argv.mode === 'cordova'
       ? path.join(outputFolder, '..')
       : outputFolder
 
-    banner(argv, 'build', {
-      buildOutputFolder: outputFolder,
-      target: quasarConf.build.target
-    })
+    banner_conf.buildOutputFolder = outputFolder
+
+    banner(argv, 'build', banner_conf)
 
     if (typeof quasarConf.build.afterBuild === 'function') {
       await quasarConf.build.afterBuild({ quasarConf })

@@ -66,7 +66,8 @@ module.exports = function (argv, cmd, details = {}) {
     if (argv['skip-pkg'] !== true) {
       banner += `
  =======================
- Output folder.......... ${green(details.buildOutputFolder)}`
+ Output folder.......... ${green(details.buildOutputFolder)}
+ Zip folder............. ${green(details.archiveOutputFolder)}`
     }
 
     if (argv.mode === 'ssr') {
