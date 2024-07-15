@@ -1,11 +1,11 @@
 
 const { join } = require('path')
+const { existsSync } = require('fs-extra')
 
 const AppBuilder = require('../../app-builder')
 const config = require('./electron-config')
 
-const { log, warn, fatal, progress } = require('../../helpers/logger')
-const { spawn } = require('../../helpers/spawn')
+const { log, warn, progress } = require('../../helpers/logger')
 const appPaths = require('../../app-paths')
 const nodePackager = require('../../helpers/node-packager')
 const getPackageJson = require('../../helpers/get-package-json')
@@ -15,11 +15,11 @@ class ElectronBuilder extends AppBuilder {
   async build () {
     await this.#buildFiles()
     await this.#writePackageJson()
-    await this.#copyElectronFiles()
+    this.#copyElectronFiles()
 
     this.printSummary(join(this.quasarConf.build.distDir, 'UnPackaged'))
 
-    if (this.argv['skip-pkg'] !== true) {
+    if (this.argv[ 'skip-pkg' ] !== true) {
       await this.#packageFiles()
     }
   }
@@ -41,7 +41,7 @@ class ElectronBuilder extends AppBuilder {
   // does not accepts the syntax of the replacement
   #replaceAppUrl (file) {
     const content = this.readFile(file)
-    this.writeFile(file, content.replace(/process\.env\.APP_URL/g, `"file://" + __dirname + "/index.html"`))
+    this.writeFile(file, content.replace(/process\.env\.APP_URL/g, '"file://" + __dirname + "/index.html"'))
   }
 
   async #writePackageJson () {
@@ -49,7 +49,7 @@ class ElectronBuilder extends AppBuilder {
 
     if (pkg.dependencies) {
       pkg.dependencies = getFixedDeps(pkg.dependencies)
-      delete pkg.dependencies['@quasar/extras']
+      delete pkg.dependencies[ '@quasar/extras' ]
     }
 
     // we don't need this (also, faster install time & smaller bundles)
@@ -66,12 +66,14 @@ class ElectronBuilder extends AppBuilder {
     this.writeFile('UnPackaged/package.json', JSON.stringify(pkg))
   }
 
-  async #copyElectronFiles () {
+  #copyElectronFiles () {
     const patterns = [
-      '.npmrc',
-      'package-lock.json',
       '.yarnrc',
+      'package-lock.json',
       'yarn.lock',
+      'pnpm-lock.yaml'
+      // bun.lockb should be ignored since it error out with devDeps in package.json
+      // (error: lockfile has changes, but lockfile is frozen)
     ].map(filename => ({
       from: filename,
       to: './UnPackaged'
@@ -83,69 +85,82 @@ class ElectronBuilder extends AppBuilder {
     })
 
     this.copyFiles(patterns)
+
+    // handle .npmrc separately
+    const npmrc = appPaths.resolve.app('.npmrc')
+    if (existsSync(npmrc)) {
+      let content = this.readFile(npmrc)
+
+      if (content.indexOf('shamefully-hoist') === -1) {
+        content += '\n# needed by pnpm\nshamefully-hoist=true'
+      }
+      // very important, otherwise PNPM creates symlinks which is NOT
+      // what we want for an Electron app that should run cross-platform
+      if (content.indexOf('node-linker') === -1) {
+        content += '\n# pnpm needs this otherwise it creates symlinks\nnode-linker=hoisted'
+      }
+
+      this.writeFile(
+        join(this.quasarConf.build.distDir, 'UnPackaged/.npmrc'),
+        content
+      )
+    }
   }
 
-  #packageFiles () {
-    return new Promise(resolve => {
-      spawn(
-        nodePackager.name,
-        [ 'install', '--production' ].concat(this.quasarConf.electron.unPackagedInstallParams),
-        { cwd: join(this.quasarConf.build.distDir, 'UnPackaged') },
-        code => {
-          if (code) {
-            fatal(`${nodePackager.name} failed installing dependencies`, 'FAIL')
-          }
-          resolve()
-        }
-      )
-    }).then(async () => {
-      if (typeof this.quasarConf.electron.beforePackaging === 'function') {
-        log('Running beforePackaging()')
-        log()
+  async #packageFiles () {
+    nodePackager.install({
+      cwd: join(this.quasarConf.build.distDir, 'UnPackaged'),
+      params: this.quasarConf.electron.unPackagedInstallParams,
+      displayName: 'UnPackaged folder production',
+      env: 'production'
+    })
 
-        const result = this.quasarConf.electron.beforePackaging({
-          appPaths,
-          unpackagedDir: join(this.quasarConf.build.distDir, 'UnPackaged')
-        })
+    if (typeof this.quasarConf.electron.beforePackaging === 'function') {
+      log('Running beforePackaging()')
+      log()
 
-        if (result && result.then) {
-          await result
-        }
-
-        log()
-        log('[SUCCESS] Done running beforePackaging()')
-      }
-    }).then(() => {
-      const bundlerName = this.quasarConf.electron.bundler
-      const bundlerConfig = this.quasarConf.electron[bundlerName]
-      const bundler = require('./bundler').getBundler(bundlerName)
-      const pkgName = `electron-${bundlerName}`
-
-      return new Promise((resolve, reject) => {
-        const done = progress('Bundling app with ___...', `electron-${bundlerName}`)
-
-        const bundlePromise = bundlerName === 'packager'
-          ? bundler({
-            ...bundlerConfig,
-            electronVersion: getPackageJson('electron').version
-          })
-          : bundler.build(bundlerConfig)
-
-        bundlePromise
-          .then(() => {
-            log()
-            done(`${pkgName} built the app`)
-            log()
-            resolve()
-          })
-          .catch(err => {
-            log()
-            warn(`${pkgName} could not build`, 'FAIL')
-            log()
-            console.error(err + '\n')
-            reject()
-          })
+      const result = this.quasarConf.electron.beforePackaging({
+        appPaths,
+        unpackagedDir: join(this.quasarConf.build.distDir, 'UnPackaged')
       })
+
+      if (result && result.then) {
+        await result
+      }
+
+      log()
+      log('[SUCCESS] Done running beforePackaging()')
+    }
+
+    const bundlerName = this.quasarConf.electron.bundler
+    const bundlerConfig = this.quasarConf.electron[ bundlerName ]
+    const bundler = require('./bundler').getBundler(bundlerName)
+    const pkgBanner = `electron/${ bundlerName }`
+
+    return new Promise((resolve, reject) => {
+      const done = progress('Bundling app with ___...', pkgBanner)
+
+      const bundlePromise = bundlerName === 'packager'
+        ? bundler({
+          ...bundlerConfig,
+          electronVersion: getPackageJson('electron').version
+        })
+        : bundler.build(bundlerConfig)
+
+      bundlePromise
+        .then(() => {
+          log()
+          done(`${ pkgBanner } built the app`)
+          log()
+          resolve()
+        })
+        .catch(err => {
+          log()
+          warn(`${ pkgBanner } could not build`, 'FAIL')
+          log()
+          console.error(err + '\n')
+          reject()
+        })
     })
   }
 }

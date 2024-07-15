@@ -62,8 +62,9 @@ module.exports = {
       },
       ssr: {
         noExternal: [
+          'quasar', // unfortunately needed for quasar/lang and quasar/icon-set
           /\/esm\/.*\.js$/,
-          /\.(es|esm|esm-browser|esm-bundler).js$/
+          /\.(es|esm|esm-browser|esm-bundler)\.js$/
         ]
       },
       build: {
@@ -81,8 +82,8 @@ module.exports = {
   webserver: quasarConf => {
     const cfg = createNodeEsbuildConfig(quasarConf, { cacheSuffix: 'ssr-webserver' })
 
-    cfg.define['process.env.CLIENT'] = false
-    cfg.define['process.env.SERVER'] = true
+    cfg.define[ 'process.env.CLIENT' ] = false
+    cfg.define[ 'process.env.SERVER' ] = true
 
     if (quasarConf.ctx.dev) {
       cfg.entryPoints = [ appPaths.resolve.app('.quasar/ssr-dev-webserver.js') ]

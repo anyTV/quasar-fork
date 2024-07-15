@@ -1,11 +1,30 @@
 const fse = require('fs-extra')
 
-const { log, fatal } = require('../helpers/logger')
+const { log, warn, fatal } = require('../helpers/logger')
 const CordovaConfig = require('./cordova-config')
 const { spawn } = require('../helpers/spawn')
 const onShutdown = require('../helpers/on-shutdown')
 const appPaths = require('../app-paths')
 const openIde = require('../helpers/open-ide')
+
+const cordovaOutputFolders = {
+  ios: [
+    'platforms/ios/build/Release-iphoneos', // ios-cordova 7+
+    'platforms/ios/build/Debug-iphoneos', // ios-cordova 7+
+    'platforms/ios/build/Release-iphonesimulator', // ios-cordova 7+
+    'platforms/ios/build/Debug-iphonesimulator', // ios-cordova 7+
+    'platforms/ios/build/device',
+    'platforms/ios/build/emulator'
+  ],
+
+  android: [
+    'platforms/android/app/build/outputs'
+  ]
+}
+
+function ensureArray (val) {
+  return (!val || Array.isArray(val)) ? val : [ val ]
+}
 
 class CordovaRunner {
   constructor () {
@@ -27,8 +46,8 @@ class CordovaRunner {
   }
 
   async run (quasarConfFile, argv) {
-    const cfg = quasarConfFile.quasarConf
-    const url = cfg.build.APP_URL
+    const { quasarConf } = quasarConfFile
+    const url = quasarConf.build.APP_URL
 
     if (this.url === url) {
       return
@@ -42,56 +61,85 @@ class CordovaRunner {
 
     if (argv.ide) {
       await this.__runCordovaCommand(
-        cfg,
-        ['prepare', this.target].concat(argv._)
+        quasarConf,
+        [ 'prepare', this.target ].concat(argv._)
       )
 
-      await openIde('cordova', cfg.bin, this.target, true)
+      await openIde('cordova', quasarConf.bin, this.target, true)
       return
     }
 
-    const args = ['run', this.target]
+    const args = [ 'run', this.target ]
 
     if (this.ctx.emulator) {
-      args.push(`--target=${this.ctx.emulator}`)
+      args.push(`--target=${ this.ctx.emulator }`)
     }
 
     await this.__runCordovaCommand(
-      cfg,
+      quasarConf,
       args.concat(argv._)
     )
   }
 
   async build (quasarConfFile, argv) {
-    const cfg = quasarConfFile.quasarConf
-    const buildPath = appPaths.resolve.cordova(
-      this.target === 'android'
-        ? 'platforms/android/app/build/outputs'
-        : 'platforms/ios/build/emulator'
+    const { quasarConf } = quasarConfFile
+
+    const cordovaContext = {
+      debug: this.ctx.debug === true,
+      target: this.target
+    }
+
+    const outputTargetList = (
+      ensureArray(quasarConf.cordova.getCordovaBuildOutputFolder?.(cordovaContext))
+      || cordovaOutputFolders[ this.target ]
     )
 
     // Remove old build output
-    fse.removeSync(buildPath)
+    outputTargetList.forEach(outputFile => {
+      fse.removeSync(
+        appPaths.resolve.cordova(outputFile)
+      )
+    })
 
-    const args = argv['skip-pkg'] || argv.ide
-      ? ['prepare', this.target]
-      : ['build', this.ctx.debug ? '--debug' : '--release', this.target]
+    const args = argv[ 'skip-pkg' ] || argv.ide
+      ? [ 'prepare', this.target ]
+      : (
+          quasarConf.cordova.getCordovaBuildParams?.(cordovaContext)
+          || [ 'build', this.ctx.debug ? '--debug' : '--release', '--device', this.target ]
+        )
 
     await this.__runCordovaCommand(
-      cfg,
+      quasarConf,
       args.concat(argv._)
     )
 
-    if (argv['skip-pkg'] === true) {
+    if (argv[ 'skip-pkg' ] === true) {
       return
     }
 
     if (argv.ide) {
-      await openIde('cordova', cfg.bin, this.target)
+      await openIde('cordova', quasarConf.bin, this.target)
       process.exit(0)
     }
 
-    fse.copySync(buildPath, cfg.build.packagedDistDir)
+    const targetFolder = quasarConf.build.packagedDistDir
+
+    for (const folder of outputTargetList) {
+      const outputFolder = appPaths.resolve.cordova(folder)
+      if (fse.existsSync(outputFolder)) {
+        log(`Copying Cordova distributables from ${ outputFolder } to ${ targetFolder }`)
+        log()
+        fse.copySync(outputFolder, targetFolder)
+        return
+      }
+    }
+
+    warn(
+      `No output folder found for target "${ this.target }".`
+      + ' Files have not been copied to /dist. You will need'
+      + ' to manually extract the Cordova distributables.'
+    )
+    log()
   }
 
   stop () {
@@ -102,11 +150,11 @@ class CordovaRunner {
     this.__cleanup()
   }
 
-  __runCordovaCommand (cfg, args) {
-    this.cordovaConfig.prepare(cfg)
+  __runCordovaCommand (quasarConf, args) {
+    this.cordovaConfig.prepare(quasarConf)
 
-    if (this.target === 'ios' && cfg.cordova.noIosLegacyBuildFlag !== true) {
-      args.push(`--buildFlag=-UseModernBuildSystem=0`)
+    if (this.target === 'ios' && quasarConf.cordova.noIosLegacyBuildFlag !== true) {
+      args.push('--buildFlag=-UseModernBuildSystem=0')
     }
 
     return new Promise(resolve => {

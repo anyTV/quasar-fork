@@ -14,13 +14,13 @@
 const useStatement = [ `config: ${JSON.stringify(framework.config)}` ]
 
 if (framework.lang) { %>
-import lang from '<%= framework.lang.includes('/') ? '' : 'quasar/lang/' %><%= framework.lang %>'
+import lang from '<%= framework.lang %>'
 <%
   useStatement.push('lang')
 }
 
 if (framework.iconSet) { %>
-import iconSet from '<%= framework.iconSet.includes('/') ? '' : 'quasar/icon-set/' %><%= framework.iconSet %>'
+import iconSet from '<%= framework.iconSet %>'
 <%
   useStatement.push('iconSet')
 }
@@ -42,9 +42,14 @@ import iconSet from '<%= framework.iconSet.includes('/') ? '' : 'quasar/icon-set
 import <%= '{' + importStatement.join(',') + '}' %> from 'quasar'
 <% } %>
 
-<% if (framework.config && framework.config.loading && framework.config.loading.spinner) { %>
+<% if (framework.config.loading?.spinner || framework.config.notify?.spinner) { %>
 const userOptions = { <%= useStatement.join(',') %> }
+  <% if (framework.config.loading?.spinner) { %>
 userOptions.config.loading.spinner = <%= framework.config.loading.spinner %>
+  <% } %>
+  <% if (framework.config.notify?.spinner) { %>
+userOptions.config.notify.spinner = <%= framework.config.notify.spinner %>
+  <% } %>
 export default userOptions
 <% } else { %>
 export default { <%= useStatement.join(',') %> }

@@ -5,12 +5,31 @@ const { join } = require('path')
 const AppBuilder = require('../../app-builder')
 const config = require('./cordova-config')
 
-const { fatal } = require('../../helpers/logger')
+const { log, warn, fatal } = require('../../helpers/logger')
 const appPaths = require('../../app-paths')
 const CordovaConfigFile = require('./config-file')
 const { spawn } = require('../../helpers/spawn')
 const openIde = require('../../helpers/open-ide')
 const onShutdown = require('../../helpers/on-shutdown')
+
+const cordovaOutputFolders = {
+  ios: [
+    'platforms/ios/build/Release-iphoneos', // ios-cordova 7+
+    'platforms/ios/build/Debug-iphoneos', // ios-cordova 7+
+    'platforms/ios/build/Release-iphonesimulator', // ios-cordova 7+
+    'platforms/ios/build/Debug-iphonesimulator', // ios-cordova 7+
+    'platforms/ios/build/device',
+    'platforms/ios/build/emulator'
+  ],
+
+  android: [
+    'platforms/android/app/build/outputs'
+  ]
+}
+
+function ensureArray (val) {
+  return (!val || Array.isArray(val)) ? val : [ val ]
+}
 
 class CapacitorBuilder extends AppBuilder {
   #cordovaConfigFile = new CordovaConfigFile()
@@ -37,7 +56,7 @@ class CapacitorBuilder extends AppBuilder {
       let html = this.readFile(indexHtmlFile)
       html = html.replace(
         /(<head[^>]*)(>)/i,
-        (_, start, end) => `${start}${end}<script src="cordova.js"></script>`
+        (_, start, end) => `${ start }${ end }<script src="cordova.js"></script>`
       )
       this.writeFile(indexHtmlFile, html)
     }
@@ -52,14 +71,22 @@ class CapacitorBuilder extends AppBuilder {
       require('../../helpers/fix-android-cleartext')('cordova')
     }
 
-    const buildPath = appPaths.resolve.cordova(
-      target === 'android'
-        ? 'platforms/android/app/build/outputs'
-        : 'platforms/ios/build/emulator'
+    const cordovaContext = {
+      debug: this.ctx.debug === true,
+      target
+    }
+
+    const outputTargetList = (
+      ensureArray(this.quasarConf.cordova.getCordovaBuildOutputFolder?.(cordovaContext))
+      || cordovaOutputFolders[ target ]
     )
 
     // Remove old build output
-    fse.removeSync(buildPath)
+    outputTargetList.forEach(outputFile => {
+      fse.removeSync(
+        appPaths.resolve.cordova(outputFile)
+      )
+    })
 
     onShutdown(() => {
       this.#cleanup()
@@ -67,22 +94,42 @@ class CapacitorBuilder extends AppBuilder {
 
     this.#cordovaConfigFile.prepare(this.quasarConf)
 
-    const args = this.argv['skip-pkg'] || this.argv.ide
-      ? ['prepare', target]
-      : ['build', this.ctx.debug ? '--debug' : '--release', target]
+    const args = this.argv[ 'skip-pkg' ] || this.argv.ide
+      ? [ 'prepare', target ]
+      : (
+        this.quasarConf.cordova.getCordovaBuildParams?.(cordovaContext)
+        || [ 'build', this.ctx.debug ? '--debug' : '--release', '--device', target ]
+      )
 
     await this.#runCordovaCommand(
       args.concat(this.argv._),
       target
     )
 
-    if (this.argv['skip-pkg'] !== true) {
+    if (this.argv[ 'skip-pkg' ] !== true) {
       if (this.argv.ide) {
         await openIde('cordova', this.quasarConf.bin, target)
         process.exit(0)
       }
 
-      fse.copySync(buildPath, join(this.quasarConf.build.distDir, this.quasarConf.ctx.targetName))
+      const targetFolder = join(this.quasarConf.build.distDir, this.quasarConf.ctx.targetName)
+
+      for (const folder of outputTargetList) {
+        const outputFolder = appPaths.resolve.cordova(folder)
+        if (fse.existsSync(outputFolder)) {
+          log(`Copying Cordova distributables from ${ outputFolder } to ${ targetFolder }`)
+          log()
+          fse.copySync(outputFolder, targetFolder)
+          return
+        }
+      }
+
+      warn(
+        `No output folder found for target "${ target }".`
+        + ' Files have not been copied to /dist. You will need'
+        + ' to manually extract the Cordova distributables.'
+      )
+      log()
     }
   }
 
@@ -92,7 +139,7 @@ class CapacitorBuilder extends AppBuilder {
 
   #runCordovaCommand (args, target) {
     if (target === 'ios' && this.quasarConf.cordova.noIosLegacyBuildFlag !== true) {
-      args.push(`--buildFlag=-UseModernBuildSystem=0`)
+      args.push('--buildFlag=-UseModernBuildSystem=0')
     }
 
     return new Promise(resolve => {

@@ -17,8 +17,8 @@ const argv = parseArgs(process.argv.slice(2), {
     h: 'help',
     d: 'devtools'
   },
-  boolean: ['h', 'i', 'd'],
-  string: ['m', 'T', 'H'],
+  boolean: [ 'h', 'i', 'd' ],
+  string: [ 'm', 'T', 'H' ],
   default: {
     m: 'spa'
   }
@@ -53,12 +53,12 @@ if (argv.help) {
   Options
     --mode, -m       App mode [spa|ssr|pwa|cordova|capacitor|electron|bex] (default: spa)
     --port, -p       A port number on which to start the application
+    --devtools, -d   Open remote Vue Devtools
     --hostname, -H   A hostname to use for serving the application
     --help, -h       Displays this message
 
     Only for Cordova mode:
-    --target, -T     (required) App target
-                        [android|ios]
+    --target, -T     (required) App target [android|ios]
     --emulator, -e   (optional) Emulator name
                         Examples: iPhone-7, iPhone-X
                         iPhone-X,com.apple.CoreSimulator.SimRuntime.iOS-12-2
@@ -66,11 +66,8 @@ if (argv.help) {
                         booting up the emulator, in which case the "--emulator"
                         param will have no effect
 
-    --devtools, -d   Open remote Vue Devtools
-
     Only for Capacitor mode:
-    --target, -T     (required) App target
-                        [android|ios]
+    --target, -T     (required) App target [android|ios]
   `)
   process.exit(0)
 }
@@ -85,38 +82,47 @@ console.log(
   )
 )
 
-function startVueDevtools () {
+async function startVueDevtools (devtoolsPort) {
   const { spawn } = require('../helpers/spawn')
   const getPackagePath = require('../helpers/get-package-path')
 
-  let vueDevtoolsBin = getPackagePath('@vue/devtools/bin.js')
+  let vueDevtoolsBin = getPackagePath('.bin/vue-devtools')
 
   function run () {
-    log(`Booting up remote Vue Devtools...`)
-    spawn(vueDevtoolsBin, [], {})
+    log('Booting up remote Vue Devtools...')
+    spawn(vueDevtoolsBin, [], {
+      env: {
+        ...process.env,
+        PORT: devtoolsPort
+      }
+    })
+
+    log('Waiting for remote Vue Devtools to initialize...')
+    return new Promise(resolve => {
+      setTimeout(resolve, 1000)
+    })
   }
 
   if (vueDevtoolsBin !== void 0) {
-    run()
+    await run()
     return
   }
 
   const nodePackager = require('../helpers/node-packager')
 
-  nodePackager.installPackage('@vue/devtools', { isDev: true })
+  nodePackager.installPackage('@vue/devtools', { isDevDependency: true })
 
   // a small delay is a must, otherwise require.resolve
   // after a yarn/npm install will fail
   return new Promise(resolve => {
-    vueDevtoolsBin = getPackagePath('@vue/devtools/bin.js')
-    run()
-    resolve()
+    vueDevtoolsBin = getPackagePath('.bin/vue-devtools')
+    run().then(resolve)
   })
 }
 
 async function goLive () {
   // install mode if it's missing
-  const { add } = require(`../modes/${argv.mode}/${argv.mode}-installation`)
+  const { add } = require(`../modes/${ argv.mode }/${ argv.mode }-installation`)
   await add(true, argv.target)
 
   const getQuasarCtx = require('../helpers/get-quasar-ctx')
@@ -136,7 +142,8 @@ async function goLive () {
   const quasarConfFile = new QuasarConfFile({
     ctx,
     port: argv.port,
-    host: argv.hostname
+    host: argv.hostname,
+    verifyAddress: true
   })
 
   const quasarConf = await quasarConfFile.read()
@@ -148,10 +155,10 @@ async function goLive () {
   regenerateTypesFeatureFlags(quasarConf)
 
   if (quasarConf.metaConf.vueDevtools !== false) {
-    await startVueDevtools()
+    await startVueDevtools(quasarConf.metaConf.vueDevtools.port)
   }
 
-  const AppDevServer = require(`../modes/${argv.mode}/${argv.mode}-devserver`)
+  const AppDevServer = require(`../modes/${ argv.mode }/${ argv.mode }-devserver`)
   const devServer = new AppDevServer({ argv, ctx, quasarConf })
 
   if (typeof quasarConf.build.beforeDev === 'function') {
@@ -160,7 +167,7 @@ async function goLive () {
 
   // run possible beforeDev hooks
   await extensionRunner.runHook('beforeDev', async hook => {
-    log(`Extension(${hook.api.extId}): Running beforeDev hook...`)
+    log(`Extension(${ hook.api.extId }): Running beforeDev hook...`)
     await hook.fn(hook.api, { quasarConf })
   })
 
@@ -171,7 +178,7 @@ async function goLive () {
       }
       // run possible afterDev hooks
       await extensionRunner.runHook('afterDev', async hook => {
-        log(`Extension(${hook.api.extId}): Running afterDev hook...`)
+        log(`Extension(${ hook.api.extId }): Running afterDev hook...`)
         await hook.fn(hook.api, { quasarConf })
       })
     })

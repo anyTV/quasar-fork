@@ -14,22 +14,22 @@ const extensionRunner = require('./app-extension/extensions-runner')
 const quasarVitePluginIndexHtmlTransform = require('./plugins/vite.index-html-transform')
 const quasarViteStripFilenameHashes = require('./plugins/vite.strip-filename-hashes')
 
-const { dependencies:cliDepsObject } = require(appPaths.resolve.cli('package.json'))
+const { dependencies: cliDepsObject } = require(appPaths.resolve.cli('package.json'))
 const appPkgFile = appPaths.resolve.app('package.json')
 const cliDeps = Object.keys(cliDepsObject)
 
-function parseVitePlugins (entries) {
+function parseVitePlugins (entries, quasarRunMode) {
   const acc = []
   let showTip = false
 
-  entries.forEach(entry => {
+  for (const entry of entries) {
     if (!entry) {
       // example:
       // [
       //   ctx.dev ? [ ... ] : null,
       //   // ...
       // ]
-      return
+      continue
     }
 
     if (Array.isArray(entry) === false) {
@@ -38,40 +38,70 @@ function parseVitePlugins (entries) {
       }
 
       acc.push(entry)
-      return
+      continue
     }
 
-    const [ name, opts ] = entry
+    const [ name, pluginOpts = {}, runOpts = { client: true, server: true } ] = entry
+
+    if (quasarRunMode === 'ssr-server') {
+      // if it's configured to not run on server, then skip it
+      if (runOpts.server === false) continue
+    }
+    else if (runOpts.client === false) {
+      // if it's configured to not run on client, then skip it
+      continue
+    }
 
     if (typeof name === 'function') {
-      acc.push(name(opts))
-      return
+      acc.push(
+        // protect against the Vite plugin mutating its own options and triggering endless cfg diff loop
+        name(merge({}, pluginOpts))
+      )
+      continue
     }
 
     if (Object(name) === name) {
-      acc.push(name)
-      return
+      acc.push(
+        // protect against the Vite plugin mutating its own options and triggering endless cfg diff loop
+        merge({}, name)
+      )
+      continue
     }
 
     if (typeof name !== 'string') {
-      console.log(name)
-      warn('quasar.config.js > invalid Vite plugin specified: ' + name)
-      warn(`Correct form: [ 'my-vite-plugin-name', { /* opts */ } ] or [ pluginFn, { /* opts */ } ]`)
-      return
+      warn('quasar.config file > invalid Vite plugin specified: ' + name)
+      warn('Correct form: [ \'my-vite-plugin-name\', { /* pluginOpts */ } ] or [ pluginFn, { /* pluginOpts */ } ]')
+      continue
     }
 
     const plugin = getPackage(name)
 
     if (!plugin) {
       warn('quasar.config.js > invalid Vite plugin specified (cannot find it): ' + name)
-      return
+      continue
     }
 
-    acc.push((plugin.default || plugin)(opts))
-  })
+    const pluginFn = (
+      plugin.default?.default // example: vite-plugin-checker
+      || plugin.default
+      || plugin
+    )
+
+    acc.push(
+      pluginFn(
+        // protect against the Vite plugin mutating its own options and triggering endless cfg diff loop
+        merge({}, pluginOpts)
+      )
+    )
+  }
 
   if (showTip === true) {
-    tip(`If you want changes to quasar.config.js > build > vitePlugins to be picked up, specify them in this form: [ [ 'plugin-name', { /* opts */ } ], ... ] or [ [ pluginFn, { /* opts */ } ], ... ]`)
+    tip(
+      'If you want changes to quasar.config file > build > vitePlugins to be picked up,'
+      + ' specify them in this form:'
+      + '[ [ \'plugin-name\', { /* pluginOpts */ }, { client: true, server: true } ], ... ]'
+      + ' or [ [ pluginFn, { /* pluginOpts */ }, { client: true, server: true } ], ... ]'
+    )
   }
 
   return acc
@@ -86,12 +116,13 @@ function createViteConfig (quasarConf, quasarRunMode) {
     removeSync(cacheDir)
   }
 
-  const vueVitePluginOptions = quasarRunMode !== 'ssr-server'
-    ? build.viteVuePluginOptions
-    : merge({
-        ssr: true,
-        template: { ssr: true }
-      }, build.viteVuePluginOptions)
+  // protect against Vite mutating its own options and triggering endless cfg diff loop
+  const vueVitePluginOptions = merge(
+    quasarRunMode !== 'ssr-server'
+      ? {}
+      : { ssr: true, template: { ssr: true } },
+    build.viteVuePluginOptions
+  )
 
   const viteConf = {
     configFile: false,
@@ -134,7 +165,7 @@ function createViteConfig (quasarConf, quasarRunMode) {
         sassVariables: quasarConf.metaConf.css.variablesFile,
         devTreeshaking: quasarConf.build.devQuasarTreeshaking === true
       }),
-      ...parseVitePlugins(build.vitePlugins)
+      ...parseVitePlugins(build.vitePlugins, quasarRunMode)
     ]
   }
 
@@ -151,7 +182,9 @@ function createViteConfig (quasarConf, quasarRunMode) {
   }
 
   if (ctx.dev) {
-    viteConf.server = quasarConf.devServer
+    // protect against Vite (or a Vite plugin) mutating the original
+    // and triggering endless cfg diff loop
+    viteConf.server = merge({}, quasarConf.devServer)
   }
   else {
     viteConf.build.outDir = build.distDir
@@ -194,7 +227,7 @@ function extendViteConfig (viteConf, quasarConf, invokeParams) {
   }
 
   const promise = extensionRunner.runHook('extendViteConf', async hook => {
-    log(`Extension(${hook.api.extId}): Extending Vite config`)
+    log(`Extension(${ hook.api.extId }): Extending Vite config`)
     await hook.fn(viteConf, opts, hook.api)
   })
 
@@ -203,8 +236,8 @@ function extendViteConfig (viteConf, quasarConf, invokeParams) {
 
 function createNodeEsbuildConfig (quasarConf, getLinterOpts) {
   // fetch fresh copy; user might have installed something new
-  delete require.cache[appPkgFile]
-  const { dependencies:appDeps = {}, devDependencies:appDevDeps = {} } = require(appPkgFile)
+  delete require.cache[ appPkgFile ]
+  const { dependencies: appDeps = {}, devDependencies: appDevDeps = {} } = require(appPkgFile)
 
   const cfg = {
     platform: 'node',
@@ -257,15 +290,15 @@ function createBrowserEsbuildConfig (quasarConf, getLinterOpts) {
 }
 
 function extendEsbuildConfig (esbuildConf, quasarConfTarget, threadName) {
-  const method = `extend${threadName}Conf`
+  const method = `extend${ threadName }Conf`
 
   // example: quasarConf.ssr.extendSSRWebserverConf
-  if (typeof quasarConfTarget[method] === 'function') {
-    quasarConfTarget[method](esbuildConf)
+  if (typeof quasarConfTarget[ method ] === 'function') {
+    quasarConfTarget[ method ](esbuildConf)
   }
 
   const promise = extensionRunner.runHook(method, async hook => {
-    log(`Extension(${hook.api.extId}): Extending "${threadName}" Esbuild config`)
+    log(`Extension(${ hook.api.extId }): Extending "${ threadName }" Esbuild config`)
     await hook.fn(esbuildConf, hook.api)
   })
 

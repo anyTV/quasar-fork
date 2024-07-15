@@ -8,6 +8,7 @@ import { QuasarElectronConfiguration } from "./electron-conf";
 import { QuasarFrameworkConfiguration } from "./framework-conf";
 import { QuasarPwaConfiguration } from "./pwa-conf";
 import { QuasarSsrConfiguration } from "./ssr-conf";
+import { QuasarMobileConfiguration } from "./mobile-conf";
 import { QuasarBexConfiguration } from "./bex";
 
 import { ServerOptions } from "vite";
@@ -45,9 +46,6 @@ interface QuasarSourceFilesConfiguration {
 }
 
 interface BaseQuasarConfiguration {
-  /** Options with which Quasar CLI will use ESLint */
-  eslint?: QuasarEslintConfiguration;
-
   /** Boot files to load. Order is important. */
   boot?: QuasarBootConfiguration;
   /**
@@ -86,13 +84,19 @@ interface BaseQuasarConfiguration {
   build?: QuasarBuildConfiguration;
   /** Change the default name of parts of your app. */
   sourceFiles?: QuasarSourceFilesConfiguration;
+
+  /**
+   * Options with which Quasar CLI will use ESLint
+   * @deprecated Use `vite-plugin-checker` instead
+   */
+  eslint?: QuasarEslintConfiguration;
 }
 
 export interface QuasarHookParams {
   quasarConf: QuasarConf;
 }
 
-export type QuasarConf = BaseQuasarConfiguration & {
+export type QuasarConf = BaseQuasarConfiguration & QuasarMobileConfiguration & {
   /** PWA specific [config](/quasar-cli/developing-pwa/configuring-pwa). */
   pwa?: QuasarPwaConfiguration;
 } & {

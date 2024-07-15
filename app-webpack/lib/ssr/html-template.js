@@ -8,54 +8,66 @@ const { fillPwaTags } = require('../webpack/pwa/plugin.html-pwa')
  * _meta.resource[X] is generated from ssr-helpers/create-renderer
  */
 
-function injectSsrInterpolation (html) {
+function injectSsrRuntimeInterpolation (html) {
   return html
-  .replace(
-    /(<html[^>]*)(>)/i,
-    (found, start, end) => {
-      let matches
+    .replace(
+      /(<html[^>]*)(>)/i,
+      (found, start, end) => {
+        let matches
 
-      matches = found.match(/\sdir\s*=\s*['"]([^'"]*)['"]/i)
-      if (matches) {
-        start = start.replace(matches[0], '')
-      }
-
-      matches = found.match(/\slang\s*=\s*['"]([^'"]*)['"]/i)
-      if (matches) {
-        start = start.replace(matches[0], '')
-      }
-
-      return `${start} {{ _meta.htmlAttrs }}${end}`
-    }
-  )
-  .replace(
-    /(<head[^>]*)(>)/i,
-    (_, start, end) => `${start}${end}{{ _meta.headTags }}`
-  )
-  .replace(
-    /(<\/head>)/i,
-    (_, tag) => `{{ _meta.resourceStyles }}{{ _meta.endingHeadTags || '' }}${tag}`
-  )
-  .replace(
-    /(<body[^>]*)(>)/i,
-    (found, start, end) => {
-      let classes = '{{ _meta.bodyClasses }}'
-
-      const matches = found.match(/\sclass\s*=\s*['"]([^'"]*)['"]/i)
-
-      if (matches) {
-        if (matches[1].length > 0) {
-          classes += ` ${matches[1]}`
+        matches = found.match(/\sdir\s*=\s*['"]([^'"]*)['"]/i)
+        if (matches) {
+          start = start.replace(matches[ 0 ], '')
         }
-        start = start.replace(matches[0], '')
-      }
 
-      return `${start} class="${classes.trim()}" {{ _meta.bodyAttrs }}${end}{{ _meta.bodyTags }}`
-    }
+        matches = found.match(/\slang\s*=\s*['"]([^'"]*)['"]/i)
+        if (matches) {
+          start = start.replace(matches[ 0 ], '')
+        }
+
+        return `${ start } {{ _meta.htmlAttrs }}${ end }`
+      }
+    )
+    .replace(
+      /(<head[^>]*)(>)/i,
+      (_, start, end) => `${ start }${ end }{{ _meta.headTags }}`
+    )
+    .replace(
+      /(<\/head>)/i,
+      (_, tag) => `{{ _meta.resourceStyles }}{{ _meta.endingHeadTags || '' }}${ tag }`
+    )
+    .replace(
+      /(<body[^>]*)(>)/i,
+      (found, start, end) => {
+        let classes = '{{ _meta.bodyClasses }}'
+
+        const matches = found.match(/\sclass\s*=\s*['"]([^'"]*)['"]/i)
+
+        if (matches) {
+          if (matches[ 1 ].length > 0) {
+            classes += ` ${ matches[ 1 ] }`
+          }
+          start = start.replace(matches[ 0 ], '')
+        }
+
+        return `${ start } class="${ classes.trim() }" {{ _meta.bodyAttrs }}${ end }{{ _meta.bodyTags }}`
+      }
+    )
+    .replace(
+      '<div id="q-app"></div>',
+      '<div id="q-app">{{ _meta.resourceApp }}</div>{{ _meta.resourceScripts }}'
+    )
+}
+
+function injectVueDevtools (html, { host, port }, nonce = '') {
+  const scripts = (
+    `<script${ nonce }>window.__VUE_DEVTOOLS_HOST__='${ host }';window.__VUE_DEVTOOLS_PORT__='${ port }';</script>`
+    + `<script src="http://${ host }:${ port }"></script>`
   )
-  .replace(
-    '<div id="q-app"></div>',
-    '<div id="q-app">{{ _meta.resourceApp }}</div>{{ _meta.resourceScripts }}'
+
+  return html.replace(
+    /(<\/head>)/i,
+    (_, tag) => `${ scripts }${ tag }`
   )
 }
 
@@ -106,19 +118,19 @@ function injectAssetsIntoHtml (html, assetTags) {
  */
 function htmlTagObjectToString (tagDefinition) {
   const attributes = Object.keys(tagDefinition.attributes || {})
-    .filter(attributeName => tagDefinition.attributes[attributeName] === '' || tagDefinition.attributes[attributeName])
+    .filter(attributeName => tagDefinition.attributes[ attributeName ] === '' || tagDefinition.attributes[ attributeName ])
     .map(attributeName => (
-      tagDefinition.attributes[attributeName] === true
+      tagDefinition.attributes[ attributeName ] === true
         ? attributeName
-        : attributeName + '="' + tagDefinition.attributes[attributeName] + '"'
+        : attributeName + '="' + tagDefinition.attributes[ attributeName ] + '"'
     ))
 
-  return '<' + [tagDefinition.tagName].concat(attributes).join(' ') + '>' +
-    (tagDefinition.innerHTML || '') +
-    (tagDefinition.voidTag ? '' : '</' + tagDefinition.tagName + '>')
+  return '<' + [ tagDefinition.tagName ].concat(attributes).join(' ') + '>'
+    + (tagDefinition.innerHTML || '')
+    + (tagDefinition.voidTag ? '' : '</' + tagDefinition.tagName + '>')
 }
 
-module.exports.getIndexHtml = function (template, cfg) {
+module.exports.getIndexHtml = async function (template, cfg) {
   const compiled = compileTemplate(template)
   let html = compiled(cfg.htmlVariables)
 
@@ -136,12 +148,17 @@ module.exports.getIndexHtml = function (template, cfg) {
     html = fillBaseTag(html, cfg.build.appBase)
   }
 
-  html = injectSsrInterpolation(html)
+  html = injectSsrRuntimeInterpolation(html)
+
+  // should be dev only
+  if (cfg.__vueDevtools !== false) {
+    html = injectVueDevtools(html, cfg.__vueDevtools, '{{ typeof nonce !== \'undefined\' ? \' nonce="\' + nonce + \'"\' : \'\' }}')
+  }
 
   if (cfg.build.minify) {
-    const { minify } = require('html-minifier')
-    html = minify(html, {
-      ...cfg.__html.minifyOptions,
+    const { minify } = require('html-minifier-terser')
+    html = await minify(html, {
+      ...cfg.build.htmlMinifyOptions,
       ignoreCustomFragments: [ /{{ [\s\S]*? }}/ ]
     })
   }

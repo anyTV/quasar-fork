@@ -1,6 +1,6 @@
 import * as ElectronBuilderUtil from "builder-util";
 import * as ElectronBuilder from "electron-builder";
-import * as ElectronPackager from "electron-packager";
+import * as ElectronPackager from "@electron/packager";
 import { LiteralUnion } from "quasar";
 import { BuildOptions as EsbuildConfiguration } from "esbuild";
 
@@ -46,9 +46,15 @@ interface QuasarBaseElectronConfiguration {
    * Specify additional parameters when yarn/npm installing
    * the UnPackaged folder, right before bundling with either
    * electron packager or electron builder;
-   * Example: [ '--ignore-optional', '--some-other-param' ]
+   * Example: [ 'install', '--production', '--ignore-optional', '--some-other-param' ]
    */
   unPackagedInstallParams?: string[];
+
+  /**
+   * Specify the debugging port to use for the Electron app when running in development mode
+   * @default 5858
+   */
+  inspectPort?: number;
 }
 
 interface QuasarElectronPackagerConfiguration
@@ -56,7 +62,7 @@ interface QuasarElectronPackagerConfiguration
   bundler: "packager";
 
   /**
-   * Electron-packager options.
+   * @electron/packager options.
    * `dir` and `out` properties are overwritten by Quasar CLI to ensure the best results.
    */
   packager?: Omit<ElectronPackagerOptions, "dir" | "out">;

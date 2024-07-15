@@ -14,14 +14,16 @@ const getPackage = require('./helpers/get-package')
 const getPackageMajorVersion = require('./helpers/get-package-major-version')
 const storeProvider = require('./helpers/store-provider')
 const { quasarVersion } = require('./helpers/banner')
+const { findClosestOpenPort, localHostList } = require('./helpers/net')
 
 const transformAssetUrls = getPackage('quasar/dist/transforms/loader-asset-urls.json')
 const urlRegex = /^http(s)?:\/\//
+const quasarComponentRE = /^(Q[A-Z]|q-)/
 
 function encode (obj) {
   return JSON.stringify(obj, (_, value) => {
     return typeof value === 'function'
-      ? `/fn(${value.toString()})`
+      ? `/fn(${ value.toString() })`
       : value
   })
 }
@@ -43,7 +45,7 @@ function formatPublicPath (path) {
   }
 
   if (!path.endsWith('/')) {
-    path = `${path}/`
+    path = `${ path }/`
   }
 
   if (urlRegex.test(path) === true) {
@@ -51,7 +53,7 @@ function formatPublicPath (path) {
   }
 
   if (!path.startsWith('/')) {
-    path = `/${path}`
+    path = `/${ path }`
   }
 
   return path
@@ -63,21 +65,21 @@ function formatRouterBase (publicPath) {
   }
 
   const match = publicPath.match(/^(https?\:)\/\/(([^:\/?#]*)(?:\:([0-9]+))?)([\/]{0,1}[^?#]*)(\?[^#]*|)(#.*|)$/)
-  return formatPublicPath(match[5] || '')
+  return formatPublicPath(match[ 5 ] || '')
 }
 
 function parseAssetProperty (prefix) {
   return asset => {
     if (typeof asset === 'string') {
       return {
-        path: asset[0] === '~' ? asset.substring(1) : prefix + `/${asset}`
+        path: asset[ 0 ] === '~' ? asset.substring(1) : prefix + `/${ asset }`
       }
     }
 
     return {
       ...asset,
       path: typeof asset.path === 'string'
-        ? (asset.path[0] === '~' ? asset.path.substring(1) : prefix + `/${asset.path}`)
+        ? (asset.path[ 0 ] === '~' ? asset.path.substring(1) : prefix + `/${ asset.path }`)
         : asset.path
     }
   }
@@ -95,12 +97,79 @@ function uniqueRegexFilter (value, index, self) {
   return self.map(regex => regex.toString()).indexOf(value.toString()) === index
 }
 
+const extRE = /\.[m|c]?[j|t]s$/
+function formatQuasarAssetPath (asset, type) {
+  return asset.indexOf('/') !== -1
+    ? (
+        extRE.test(asset) === true
+          ? asset
+          : `${ asset }.js`
+      )
+    : `quasar/${ type }/${ asset }.js`
+}
+
+let cachedExternalHost, addressRunning = false
+
+async function onAddress ({ host, port }, mode) {
+  if (
+    [ 'cordova', 'capacitor' ].includes(mode)
+    && (!host || localHostList.includes(host.toLowerCase()))
+  ) {
+    if (cachedExternalHost) {
+      host = cachedExternalHost
+    }
+    else {
+      const getExternalIP = require('./helpers/get-external-ip.js')
+      host = await getExternalIP()
+      cachedExternalHost = host
+    }
+  }
+
+  try {
+    const openPort = await findClosestOpenPort(port, host)
+    if (port !== openPort) {
+      warn()
+      warn(`️️Setting port to closest one available: ${ openPort }`)
+      warn()
+
+      port = openPort
+    }
+  }
+  catch (e) {
+    warn()
+
+    if (e.message === 'ERROR_NETWORK_PORT_NOT_AVAIL') {
+      warn('Could not find an open port. Please configure a lower one to start searching with.')
+    }
+    else if (e.message === 'ERROR_NETWORK_ADDRESS_NOT_AVAIL') {
+      warn('Invalid host specified. No network address matches. Please specify another one.')
+    }
+    else {
+      warn('Unknown network error occurred')
+      console.log(e)
+    }
+
+    warn()
+
+    if (addressRunning === false) {
+      process.exit(1)
+    }
+
+    return null
+  }
+
+  addressRunning = true
+  return { host, port }
+}
+
 /*
- * this.quasarConf          - Compiled Object from quasar.conf.js
+ * this.quasarConf          - Compiled Object from quasar.conf(ig).js
  * this.webpackConf         - Webpack config(s)
  */
 
 class QuasarConfFile {
+  #vueDevtools
+
   constructor (ctx, opts = {}) {
     this.ctx = ctx
     this.opts = opts
@@ -111,22 +180,22 @@ class QuasarConfFile {
     if (this.watch) {
       // Start watching for quasar.conf(ig).js changes
       chokidar
-      .watch(this.filename, { ignoreInitial: true })
-      .on('change', debounce(async () => {
-        console.log()
-        log(`quasar.config.js changed`)
+        .watch(this.filename, { ignoreInitial: true })
+        .on('change', debounce(async () => {
+          console.log()
+          log('quasar.config.js changed')
 
-        const result = await this.reboot()
+          const result = await this.reboot()
 
-        if (result !== false) {
-          if (this.webpackConfChanged === true) {
-            opts.onBuildChange()
+          if (result !== false) {
+            if (this.webpackConfChanged === true) {
+              opts.onBuildChange()
+            }
+            else {
+              opts.onAppChange()
+            }
           }
-          else {
-            opts.onAppChange()
-          }
-        }
-      }, 1000))
+        }, 1000))
     }
   }
 
@@ -137,7 +206,7 @@ class QuasarConfFile {
     catch (e) {
       if (e.message !== 'NETWORK_ERROR') {
         console.error(e)
-        warn(`quasar.config.js has JS errors. Please fix them then save file again.\n`)
+        warn('quasar.config.js has JS errors. Please fix them then save file again.\n')
       }
 
       return false
@@ -150,7 +219,7 @@ class QuasarConfFile {
     let quasarConfigFunction
 
     if (fs.existsSync(this.filename)) {
-      delete require.cache[this.filename]
+      delete require.cache[ this.filename ]
       quasarConfigFunction = require(this.filename)
     }
     else {
@@ -180,7 +249,8 @@ class QuasarConfFile {
         uglifyOptions: {
           compress: {},
           mangle: {}
-        }
+        },
+        htmlMinifyOptions: {}
       },
       devServer: {
         server: {}
@@ -188,7 +258,8 @@ class QuasarConfFile {
       framework: {
         components: [],
         directives: [],
-        plugins: []
+        plugins: [],
+        config: {}
       },
       animations: [],
       extras: [],
@@ -248,9 +319,9 @@ class QuasarConfFile {
       }
 
       if (
-        this.address &&
-        this.address.from.host === cfg.devServer.host &&
-        this.address.from.port === cfg.devServer.port
+        this.address
+        && this.address.from.host === cfg.devServer.host
+        && this.address.from.port === cfg.devServer.port
       ) {
         cfg.devServer.host = this.address.to.host
         cfg.devServer.port = this.address.to.port
@@ -260,8 +331,8 @@ class QuasarConfFile {
           host: cfg.devServer.host,
           port: cfg.devServer.port
         }
-        const to = this.opts.onAddress !== void 0
-          ? await this.opts.onAddress(addr)
+        const to = this.opts.verifyAddress === true
+          ? await onAddress(addr, this.ctx.modeName)
           : addr
 
         // if network error while running
@@ -284,10 +355,10 @@ class QuasarConfFile {
   }
 
   async compile () {
-    let cfg = this.sourceCfg
+    const cfg = this.sourceCfg
 
     await extensionRunner.runHook('extendQuasarConf', async hook => {
-      log(`Extension(${hook.api.extId}): Extending quasar.config.js...`)
+      log(`Extension(${ hook.api.extId }): Extending quasar.config.js...`)
       await hook.fn(cfg, hook.api)
     })
 
@@ -317,6 +388,7 @@ class QuasarConfFile {
       // vue
       __VUE_OPTIONS_API__: cfg.build.vueOptionsApi !== false,
       __VUE_PROD_DEVTOOLS__: this.ctx.dev === true || this.ctx.debug === true,
+      __VUE_PROD_HYDRATION_MISMATCH_DETAILS__: this.ctx.dev === true || this.ctx.debug === true, // Vue 3.4+
 
       // quasar
       __QUASAR_VERSION__: JSON.stringify(quasarVersion),
@@ -368,22 +440,40 @@ class QuasarConfFile {
       cfg.animations = getUniqueArray(cfg.animations)
     }
 
-    if (!['kebab', 'pascal', 'combined'].includes(cfg.framework.autoImportComponentCase)) {
+    if (![ 'kebab', 'pascal', 'combined' ].includes(cfg.framework.autoImportComponentCase)) {
       cfg.framework.autoImportComponentCase = 'kebab'
     }
 
     // special case where a component can be designated for a framework > config prop
-    if (cfg.framework.config && cfg.framework.config.loading) {
-      const component = cfg.framework.config.loading.spinner
-      // Is a component and is a QComponent
-      if (component !== void 0 && /^(Q[A-Z]|q-)/.test(component) === true) {
-        cfg.framework.components.push(component)
+    const { config } = cfg.framework
+
+    if (config.loading) {
+      const { spinner } = config.loading
+      if (quasarComponentRE.test(spinner)) {
+        cfg.framework.components.push(spinner)
+      }
+    }
+
+    if (config.notify) {
+      const { spinner } = config.notify
+      if (quasarComponentRE.test(spinner)) {
+        cfg.framework.components.push(spinner)
       }
     }
 
     cfg.framework.components = getUniqueArray(cfg.framework.components)
     cfg.framework.directives = getUniqueArray(cfg.framework.directives)
     cfg.framework.plugins = getUniqueArray(cfg.framework.plugins)
+
+    const { lang, iconSet } = cfg.framework
+
+    if (lang !== void 0) {
+      cfg.framework.lang = formatQuasarAssetPath(lang, 'lang')
+    }
+
+    if (iconSet !== void 0) {
+      cfg.framework.iconSet = formatQuasarAssetPath(iconSet, 'icon-set')
+    }
 
     cfg.build = merge({
       vueLoaderOptions: {
@@ -401,7 +491,7 @@ class QuasarConfFile {
       distDir: path.join('dist', this.ctx.modeName),
       htmlFilename: 'index.html',
       ssrPwaHtmlFilename: 'offline.html', // do NOT use index.html as name!
-                                          // will mess up SSR
+      // will mess up SSR
       vueRouterMode: 'hash',
       transpile: true,
       // transpileDependencies: [], // leaving here for completeness
@@ -444,12 +534,21 @@ class QuasarConfFile {
         mangle: {
           safari10: true
         }
+      },
+      htmlMinifyOptions: {
+        removeComments: true,
+        collapseWhitespace: true,
+        removeAttributeQuotes: true,
+        collapseBooleanAttributes: true,
+        removeScriptTypeAttributes: true
+        // more options:
+        // https://github.com/terser/html-minifier-terser?tab=readme-ov-file#options-quick-reference
       }
     }, cfg.build)
 
     if (cfg.build.transpile === true) {
       cfg.build.transpileDependencies = cfg.build.transpileDependencies.filter(uniqueRegexFilter)
-      cfg.__transpileBanner = green(`yes (Babel)`)
+      cfg.__transpileBanner = green('yes (Babel)')
     }
     else {
       cfg.__transpileBanner = 'no'
@@ -496,15 +595,15 @@ class QuasarConfFile {
     }
 
     if (this.ctx.mode.cordova || this.ctx.mode.capacitor) {
-      cfg.build.distDir = appPaths.resolve[this.ctx.modeName]('www')
+      cfg.build.distDir = appPaths.resolve[ this.ctx.modeName ]('www')
     }
     else if (this.ctx.mode.electron || this.ctx.mode.bex) {
       cfg.build.packagedDistDir = cfg.build.distDir
       cfg.build.distDir = path.join(cfg.build.distDir, 'UnPackaged')
     }
 
-    cfg.build.publicPath =
-      cfg.build.publicPath && ['spa', 'pwa', 'ssr'].includes(this.ctx.modeName)
+    cfg.build.publicPath
+      = cfg.build.publicPath && [ 'spa', 'pwa', 'ssr' ].includes(this.ctx.modeName)
         ? formatPublicPath(cfg.build.publicPath)
         : (cfg.build.vueRouterMode === 'hash' ? '' : '/')
 
@@ -521,7 +620,7 @@ class QuasarConfFile {
     cfg.sourceFiles = merge({
       rootComponent: 'src/App.vue',
       router: 'src/router/index',
-      store: `src/${storeProvider.pathKey}/index`,
+      store: `src/${ storeProvider.pathKey }/index`,
       indexHtmlTemplate: 'src/index.template.html',
       registerServiceWorker: 'src-pwa/register-service-worker',
       serviceWorker: 'src-pwa/custom-service-worker',
@@ -536,9 +635,9 @@ class QuasarConfFile {
     // do we have a store?
     const storePath = appPaths.resolve.app(cfg.sourceFiles.store)
     cfg.store = (
-      fs.existsSync(storePath) ||
-      fs.existsSync(storePath + '.js') ||
-      fs.existsSync(storePath + '.ts')
+      fs.existsSync(storePath)
+      || fs.existsSync(storePath + '.js')
+      || fs.existsSync(storePath + '.ts')
     )
 
     // make sure we have preFetch in config
@@ -612,7 +711,7 @@ class QuasarConfFile {
           }
         : {
             historyApiFallback: cfg.build.vueRouterMode === 'history'
-              ? { index: `${cfg.build.publicPath || '/'}${cfg.build.htmlFilename}` }
+              ? { index: `${ cfg.build.publicPath || '/' }${ cfg.build.htmlFilename }` }
               : false,
             devMiddleware: {
               index: cfg.build.htmlFilename
@@ -633,7 +732,7 @@ class QuasarConfFile {
             }
 
             if (this.ctx.mode.cordova) {
-              const folder = appPaths.resolve.cordova(`platforms/${this.ctx.targetName}/platform_www`)
+              const folder = appPaths.resolve.cordova(`platforms/${ this.ctx.targetName }/platform_www`)
               app.use('/', express.static(folder, { maxAge: 0 }))
             }
           }
@@ -667,11 +766,18 @@ class QuasarConfFile {
       }
 
       if (this.ctx.vueDevtools === true || cfg.devServer.vueDevtools === true) {
-        cfg.__needsAppMountHook = true
-        cfg.__vueDevtools = {
-          host: cfg.devServer.host === '0.0.0.0' ? 'localhost' : cfg.devServer.host,
-          port: 8098
+        if (this.#vueDevtools === void 0) {
+          const host = localHostList.includes(cfg.devServer.host.toLowerCase())
+            ? 'localhost'
+            : cfg.devServer.host
+
+          this.#vueDevtools = {
+            host,
+            port: await findClosestOpenPort(11111, '0.0.0.0')
+          }
         }
+
+        cfg.__vueDevtools = { ...this.#vueDevtools }
       }
 
       // make sure the prop is not supplied to webpack dev server
@@ -709,10 +815,10 @@ class QuasarConfFile {
     }
 
     if (cfg.build.gzip) {
-      let gzip = cfg.build.gzip === true
+      const gzip = cfg.build.gzip === true
         ? {}
         : cfg.build.gzip
-      let ext = ['js', 'css']
+      let ext = [ 'js', 'css' ]
 
       if (gzip.extensions) {
         ext = gzip.extensions
@@ -754,20 +860,20 @@ class QuasarConfFile {
 
       if (cfg.pwa.manifest.icons.length === 0) {
         warn()
-        warn(`PWA manifest in quasar.config.js > pwa > manifest is missing "icons" prop.\n`)
+        warn('PWA manifest in quasar.config.js > pwa > manifest is missing "icons" prop.\n')
         process.exit(1)
       }
 
-      if (!['GenerateSW', 'InjectManifest'].includes(cfg.pwa.workboxPluginMode)) {
+      if (![ 'GenerateSW', 'InjectManifest' ].includes(cfg.pwa.workboxPluginMode)) {
         warn()
-        warn(`Workbox webpack plugin mode "${cfg.pwa.workboxPluginMode}" is invalid.`)
-        warn(`Valid Workbox modes are: GenerateSW, InjectManifest\n`)
+        warn(`Workbox webpack plugin mode "${ cfg.pwa.workboxPluginMode }" is invalid.`)
+        warn('Valid Workbox modes are: GenerateSW, InjectManifest\n')
         process.exit(1)
       }
 
       cfg.pwa.manifest.icons = cfg.pwa.manifest.icons.map(icon => {
         if (urlRegex.test(icon.src) === false) {
-          icon.src = `${cfg.build.publicPath}${icon.src}`
+          icon.src = `${ cfg.build.publicPath }${ icon.src }`
         }
         return icon
       })
@@ -778,7 +884,7 @@ class QuasarConfFile {
         ? (cfg.build.htmlFilename !== 'index.html' ? (cfg.build.publicPath ? '' : '/') + cfg.build.htmlFilename : '')
         : ''
 
-      cfg.__getUrl = hostname => `http${cfg.devServer.server.type === 'https' ? 's' : ''}://${hostname}:${cfg.devServer.port}${cfg.build.publicPath}${urlPath}`
+      cfg.__getUrl = hostname => `http${ cfg.devServer.server.type === 'https' ? 's' : '' }://${ hostname }:${ cfg.devServer.port }${ cfg.build.publicPath }${ urlPath }`
       cfg.build.APP_URL = cfg.__getUrl(
         cfg.devServer.host === '0.0.0.0'
           ? 'localhost'
@@ -789,7 +895,7 @@ class QuasarConfFile {
       cfg.build.APP_URL = 'index.html'
     }
     else if (this.ctx.mode.electron) {
-      cfg.__rootDefines[`process.env.APP_URL`] = `"file://" + __dirname + "/index.html"`
+      cfg.__rootDefines[ 'process.env.APP_URL' ] = '"file://" + __dirname + "/index.html"'
     }
 
     Object.assign(cfg.build.env, {
@@ -806,7 +912,7 @@ class QuasarConfFile {
     })
 
     if (this.ctx.mode.pwa) {
-      cfg.build.env.SERVICE_WORKER_FILE = `${cfg.build.publicPath}service-worker.js`
+      cfg.build.env.SERVICE_WORKER_FILE = `${ cfg.build.publicPath }service-worker.js`
     }
     else if (this.ctx.mode.bex) {
       cfg.bex = merge({}, cfg.bex, {
@@ -892,7 +998,7 @@ class QuasarConfFile {
         }
 
         if (cfg.ctx.archName) {
-          cfg.electron.builder[cfg.ctx.archName] = true
+          cfg.electron.builder[ cfg.ctx.archName ] = true
         }
 
         if (cfg.ctx.publish) {
@@ -911,20 +1017,6 @@ class QuasarConfFile {
       productName: escapeHTMLTagContent(cfg.build.productName),
       productDescription: escapeHTMLAttribute(cfg.build.productDescription)
     }, cfg.htmlVariables)
-
-    cfg.__html = {
-      minifyOptions: cfg.build.minify
-        ? {
-          removeComments: true,
-          collapseWhitespace: true,
-          removeAttributeQuotes: true,
-          collapseBooleanAttributes: true,
-          removeScriptTypeAttributes: true
-          // more options:
-          // https://github.com/kangax/html-minifier#options-quick-reference
-        }
-        : false
-    }
 
     // used by .quasar entry templates
     cfg.__versions = {}
