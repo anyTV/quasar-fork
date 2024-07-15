@@ -100,8 +100,8 @@ class SsrBuilder extends AppBuilder {
         start: 'node index.js'
       },
       dependencies: Object.assign(appDeps, {
-        'compression': cliDeps.compression,
-        'express': cliDeps.express
+        compression: cliDeps.compression,
+        express: cliDeps.express
       }),
       engines: appPkg.engines,
       browserslist: appPkg.browserslist,
@@ -109,7 +109,7 @@ class SsrBuilder extends AppBuilder {
     }
 
     if (this.quasarConf.ssr.manualStoreSerialization !== true) {
-      pkg.dependencies['serialize-javascript'] = cliDeps['serialize-javascript']
+      pkg.dependencies[ 'serialize-javascript' ] = cliDeps[ 'serialize-javascript' ]
     }
 
     if (typeof this.quasarConf.ssr.extendPackageJson === 'function') {
@@ -123,14 +123,14 @@ class SsrBuilder extends AppBuilder {
     const htmlFile = join(clientDir, 'index.html')
     const html = this.readFile(htmlFile)
 
-    const templateFn = getProdSsrTemplateFn(html, this.quasarConf)
+    const templateFn = await getProdSsrTemplateFn(html, this.quasarConf)
 
-    this.writeFile('render-template.js', `module.exports=${templateFn.source}`)
+    this.writeFile('render-template.js', `module.exports=${ templateFn.source }`)
 
     if (this.quasarConf.ssr.pwa === true) {
       this.writeFile(
-        `client/${this.quasarConf.ssr.ssrPwaHtmlFilename}`,
-        transformProdSsrPwaOfflineHtml(html, this.quasarConf)
+        `client/${ this.quasarConf.ssr.ssrPwaHtmlFilename }`,
+        await transformProdSsrPwaOfflineHtml(html, this.quasarConf)
       )
     }
 

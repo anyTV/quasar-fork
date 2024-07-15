@@ -10,17 +10,6 @@
  * Boot files are your "main.js"
  **/
 
-<% if (__vueDevtools !== false) { %>
-import vueDevtools from '@vue/devtools'
-<% } %>
-
-import { Quasar } from 'quasar'
-import { markRaw } from 'vue'
-import <%= __needsAppMountHook === true ? 'AppComponent' : 'RootComponent' %> from 'app/<%= sourceFiles.rootComponent %>'
-
-<% if (store) { %>import createStore from 'app/<%= sourceFiles.store %>'<% } %>
-import createRouter from 'app/<%= sourceFiles.router %>'
-
 <% if (ctx.mode.capacitor) { %>
   <% if (__versions.capacitor <= 2) { %>
   import { Plugins } from '@capacitor/core'
@@ -37,6 +26,13 @@ import createRouter from 'app/<%= sourceFiles.router %>'
   <% } %>
 <% } %>
 
+import { Quasar } from 'quasar'
+import { markRaw } from 'vue'
+import <%= __needsAppMountHook === true ? 'AppComponent' : 'RootComponent' %> from 'app/<%= sourceFiles.rootComponent %>'
+
+<% if (store) { %>import createStore from 'app/<%= sourceFiles.store %>'<% } %>
+import createRouter from 'app/<%= sourceFiles.router %>'
+
 <% if (__needsAppMountHook === true) { %>
 import { defineComponent, h, onMounted<%= ctx.mode.ssr && ssr.manualPostHydrationTrigger !== true ? ', getCurrentInstance' : '' %> } from 'vue'
 const RootComponent = defineComponent({
@@ -45,10 +41,6 @@ const RootComponent = defineComponent({
     onMounted(() => {
       <% if (ctx.mode.capacitor && __versions.capacitorPluginSplashscreen && capacitor.hideSplashscreen !== false) { %>
       SplashScreen.hide()
-      <% } %>
-
-      <% if (__vueDevtools !== false) { %>
-      vueDevtools.connect('<%= __vueDevtools.host %>', <%= __vueDevtools.port %>)
       <% } %>
 
       <% if (ctx.mode.ssr && ssr.manualPostHydrationTrigger !== true) { %>

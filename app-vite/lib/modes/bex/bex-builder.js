@@ -47,8 +47,8 @@ class BexBuilder extends AppBuilder {
     const done = progress('Bundling in progress...')
     const file = join(outFolder, `${name}-v${version}-${env}.zip`)
 
-    let output = createWriteStream(file)
-    let archive = archiver('zip', {
+    const output = createWriteStream(file)
+    const archive = archiver('zip', {
       zlib: { level: 9 } // Sets the compression level.
     })
 
@@ -56,7 +56,7 @@ class BexBuilder extends AppBuilder {
     archive.directory(srcFolder, false)
     archive.finalize()
 
-    done(`Bundle has been generated at: ${file}`)
+    done(`Bundle has been generated at: ${ file }`)
   }
 }
 

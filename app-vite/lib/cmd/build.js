@@ -16,8 +16,8 @@ const argv = parseArgs(process.argv.slice(2), {
     h: 'help',
     P: 'publish'
   },
-  boolean: ['h', 'd', 'u', 'i'],
-  string: ['m', 'T', 'P'],
+  boolean: [ 'h', 'd', 'u', 'i' ],
+  string: [ 'm', 'T', 'P' ],
   default: {
     m: 'spa'
   }
@@ -53,7 +53,7 @@ if (argv.help) {
                         [android|ios]
                       - Capacitor
                         [android|ios]
-                      - Electron with default "electron-packager" bundler (default: yours)
+                      - Electron with default "@electron/packager" bundler (default: yours)
                         [darwin|win32|linux|mas|all]
                       - Electron with "electron-builder" bundler (default: yours)
                         [darwin|mac|win32|win|linux|all]
@@ -62,8 +62,8 @@ if (argv.help) {
                         electron-builder as bundler
     --debug, -d     Build for debugging purposes
     --skip-pkg, -s  Build only UI (skips creating Cordova/Capacitor/Electron executables)
-                      - Cordova (it only fills in /src/cordova/www folder with the UI code)
-                      - Capacitor (it only fills in /src/capacitor/www folder with the UI code)
+                      - Cordova (it only fills in /src-cordova/www folder with the UI code)
+                      - Capacitor (it only fills in /src-capacitor/www folder with the UI code)
                       - Electron (it only creates the /dist/electron/UnPackaged folder)
     --help, -h      Displays this message
 
@@ -72,10 +72,10 @@ if (argv.help) {
                     terminal/console-only build
 
     ONLY for Electron mode:
-    --bundler, -b   Bundler (electron-packager or electron-builder)
+    --bundler, -b   Bundler (@electron/packager or electron-builder)
                       [packager|builder]
     --arch, -A      App architecture (default: yours)
-                      - with default "electron-packager" bundler:
+                      - with default "@electron/packager" bundler:
                           [ia32|x64|armv7l|arm64|mips64el|all]
                       - with "electron-builder" bundler:
                           [ia32|x64|armv7l|arm64|all]
@@ -83,7 +83,6 @@ if (argv.help) {
     ONLY for electron-builder (when using "publish" parameter):
     --publish, -P  Publish options [onTag|onTagOrDraft|always|never]
                      - see https://www.electron.build/configuration/publish
-
   `)
   process.exit(0)
 }
@@ -106,7 +105,7 @@ const path = require('path')
 
 async function build () {
   // install mode if it's missing
-  const { add } = require(`../modes/${argv.mode}/${argv.mode}-installation`)
+  const { add } = require(`../modes/${ argv.mode }/${ argv.mode }-installation`)
   await add(true, argv.target)
 
   const getQuasarCtx = require('../helpers/get-quasar-ctx')
@@ -139,7 +138,7 @@ async function build () {
   const regenerateTypesFeatureFlags = require('../helpers/types-feature-flags')
   regenerateTypesFeatureFlags(quasarConf)
 
-  const AppProdBuilder = require(`../modes/${argv.mode}/${argv.mode}-builder`)
+  const AppProdBuilder = require(`../modes/${ argv.mode }/${ argv.mode }-builder`)
   const appBuilder = new AppProdBuilder({ argv, quasarConf })
 
   const artifacts = require('../artifacts')
@@ -160,7 +159,7 @@ async function build () {
 
   // run possible beforeBuild hooks
   await extensionRunner.runHook('beforeBuild', async hook => {
-    log(`Extension(${hook.api.extId}): Running beforeBuild hook...`)
+    log(`Extension(${ hook.api.extId }): Running beforeBuild hook...`)
     await hook.fn(hook.api, { quasarConf })
   })
 
@@ -168,50 +167,55 @@ async function build () {
     target: quasarConf.build.target
   }
 
-  appBuilder.build().then(async () => {
-    artifacts.add(outputFolder)
+  appBuilder.build()
+    .catch(err => {
+      console.error(err)
+      fatal('App build failed (check the log above)', 'FAIL')
+    })
+    .then(async () => {
+      artifacts.add(outputFolder)
 
     if (argv.mode === 'bex') {
       artifacts.add(zipFolder)
       banner_conf.archiveOutputFolder = zipFolder
     }
 
-    outputFolder = argv.mode === 'cordova'
-      ? path.join(outputFolder, '..')
-      : outputFolder
+      outputFolder = argv.mode === 'cordova'
+        ? path.join(outputFolder, '..')
+        : outputFolder
 
     banner_conf.buildOutputFolder = outputFolder
 
     banner(argv, 'build', banner_conf)
 
-    if (typeof quasarConf.build.afterBuild === 'function') {
-      await quasarConf.build.afterBuild({ quasarConf })
-    }
-
-    // run possible beforeBuild hooks
-    await extensionRunner.runHook('afterBuild', async hook => {
-      log(`Extension(${hook.api.extId}): Running afterBuild hook...`)
-      await hook.fn(hook.api, { quasarConf })
-    })
-
-    if (argv.publish !== void 0) {
-      const opts = {
-        arg: argv.publish,
-        distDir: outputFolder,
-        quasarConf
+      if (typeof quasarConf.build.afterBuild === 'function') {
+        await quasarConf.build.afterBuild({ quasarConf })
       }
 
-      if (typeof quasarConf.build.onPublish === 'function') {
-        await quasarConf.build.onPublish(opts)
-      }
-
-      // run possible onPublish hooks
-      await extensionRunner.runHook('onPublish', async hook => {
-        log(`Extension(${hook.api.extId}): Running onPublish hook...`)
-        await hook.fn(hook.api, opts)
+      // run possible beforeBuild hooks
+      await extensionRunner.runHook('afterBuild', async hook => {
+        log(`Extension(${ hook.api.extId }): Running afterBuild hook...`)
+        await hook.fn(hook.api, { quasarConf })
       })
-    }
-  })
+
+      if (argv.publish !== void 0) {
+        const opts = {
+          arg: argv.publish,
+          distDir: outputFolder,
+          quasarConf
+        }
+
+        if (typeof quasarConf.build.onPublish === 'function') {
+          await quasarConf.build.onPublish(opts)
+        }
+
+        // run possible onPublish hooks
+        await extensionRunner.runHook('onPublish', async hook => {
+          log(`Extension(${ hook.api.extId }): Running onPublish hook...`)
+          await hook.fn(hook.api, opts)
+        })
+      }
+    })
 }
 
 build()

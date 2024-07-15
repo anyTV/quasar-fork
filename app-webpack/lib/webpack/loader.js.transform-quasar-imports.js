@@ -1,5 +1,13 @@
 const getPackage = require('../helpers/get-package')
-const importTransformation = getPackage('quasar/dist/transforms/import-transformation.js')
+const importMap = getPackage('quasar/dist/transforms/import-map.json')
+
+function importTransformation (importName) {
+  const file = importMap[ importName ]
+  if (file === void 0) {
+    throw new Error('Unknown import from Quasar: ' + importName)
+  }
+  return 'quasar/' + file
+}
 
 const regex = /import\s*\{([\w,\s]+)\}\s*from\s*(['"])quasar\2;?/g
 
@@ -18,9 +26,9 @@ module.exports = function (content, map) {
         }
 
         const data = id.split(' as ')
-        const name = data[0].trim()
+        const name = data[ 0 ].trim()
 
-        return `import ${data[1] !== void 0 ? data[1].trim() : name} from '${importTransformation(name)}';`
+        return `import ${ data[ 1 ] !== void 0 ? data[ 1 ].trim() : name } from '${ importTransformation(name) }';`
       })
       .join('')
   )

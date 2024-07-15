@@ -8,18 +8,18 @@ function makeTag (tagName, attributes, closeTag = false) {
   }
 }
 
-// function makeScriptTag (innerHTML) {
-//   return {
-//     tagName: 'script',
-//     closeTag: true,
-//     innerHTML
-//   }
-// }
+function makeScriptTag (innerHTML) {
+  return {
+    tagName: 'script',
+    closeTag: true,
+    innerHTML
+  }
+}
 
 function fillBaseTag (html, base) {
   return html.replace(
     /(<head[^>]*)(>)/i,
-    (_, start, end) => `${start}${end}<base href="${base}">`
+    (_, start, end) => `${ start }${ end }<base href="${ base }">`
   )
 }
 
@@ -37,6 +37,14 @@ module.exports.plugin = class HtmlAddonsPlugin {
       hooks.afterTemplateExecution.tapAsync('webpack-plugin-html-addons', (data, callback) => {
         if (this.cfg.build.appBase) {
           data.html = fillBaseTag(data.html, this.cfg.build.appBase)
+        }
+
+        if (this.cfg.__vueDevtools !== false) {
+          const { host, port } = this.cfg.__vueDevtools
+          data.headTags.push(
+            makeScriptTag(`window.__VUE_DEVTOOLS_HOST__ = '${ host }';window.__VUE_DEVTOOLS_PORT__ = '${ port }';`),
+            makeTag('script', { src: `http://${ host }:${ port }` }, true)
+          )
         }
 
         if (this.cfg.ctx.mode.cordova) {

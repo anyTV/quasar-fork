@@ -18,16 +18,16 @@ function getHtmlFilename (cfg) {
 
 module.exports = function (chain, cfg, templateParam) {
   chain.plugin('html-webpack')
-    .use(HtmlWebpackPlugin, [{
+    .use(HtmlWebpackPlugin, [ {
       filename: getHtmlFilename(cfg),
       template: appPaths.resolve.app(cfg.sourceFiles.indexHtmlTemplate),
-      minify: cfg.__html.minifyOptions,
+      minify: cfg.build.htmlMinifyOptions,
       templateParameters: templateParam || cfg.htmlVariables,
       chunksSortMode: 'none',
       // inject script tags for bundle
       inject: true,
       cache: true
-    }])
+    } ])
 
   chain.plugin('html-addons')
     .use(HtmlAddonsPlugin, [ cfg ])
