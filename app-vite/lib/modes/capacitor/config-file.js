@@ -55,6 +55,13 @@ public class EnableHttpsSelfSigned {
 }`
 }
 
+const sslSkipVersion = {
+  4: '^0.2.0',
+  5: '^0.3.0',
+  6: '^0.4.0',
+  default: '^0.4.0'
+}
+
 class CapacitorConfigFile {
   #tamperedFiles = []
 
@@ -72,7 +79,7 @@ class CapacitorConfigFile {
     this.#tamperedFiles.push({
       path: capJsonPath,
       name: 'capacitor.config.json',
-      content: this.#updateCapJson(quasarConf, capJson),
+      content: this.#updateCapJson(quasarConf, capJson, target),
       originalContent: JSON.stringify(capJson, null, 2)
     })
 
@@ -100,7 +107,7 @@ class CapacitorConfigFile {
     })
   }
 
-  #updateCapJson (quasarConf, originalCapCfg) {
+  #updateCapJson (quasarConf, originalCapCfg, target) {
     const capJson = { ...originalCapCfg }
 
     capJson.appName = quasarConf.capacitor.appName || pkg.productName || 'Quasar App'
@@ -112,13 +119,17 @@ class CapacitorConfigFile {
     if (quasarConf.ctx.dev) {
       capJson.server = capJson.server || {}
       capJson.server.url = quasarConf.metaConf.APP_URL
+      if (target === 'android' && capVersion >= 2) {
+        capJson.server.cleartext = true
+      }
     }
     else {
       capJson.webDir = 'www'
 
       // ensure we don't run from a remote server
-      if (capJson.server && capJson.server.url) {
+      if (capJson.server) {
         delete capJson.server.url
+        delete capJson.server.cleartext
       }
     }
 
@@ -151,7 +162,8 @@ class CapacitorConfigFile {
       }
 
       const fn = `${ add ? '' : 'un' }installPackage`
-      const nameParam = add ? '@jcesarmobile/ssl-skip@^0.2.0' : '@jcesarmobile/ssl-skip'
+      const version = sslSkipVersion[ capVersion ] || sslSkipVersion.default
+      const nameParam = add ? `@jcesarmobile/ssl-skip@${ version }` : '@jcesarmobile/ssl-skip'
 
       nodePackager[ fn ](nameParam, {
         cwd: appPaths.capacitorDir,

@@ -6,6 +6,7 @@ const { spawn, spawnSync } = require('../helpers/spawn')
 const onShutdown = require('../helpers/on-shutdown')
 const appPaths = require('../app-paths')
 const openIde = require('../helpers/open-ide')
+const { SIGNAL__BUILD_SHOULD_EXIT } = require('../helpers/signals.js')
 
 const { capBin } = require('./cap-cli')
 
@@ -22,10 +23,6 @@ class CapacitorRunner {
   init (ctx) {
     this.ctx = ctx
     this.target = ctx.targetName
-
-    if (this.target === 'android') {
-      require('../helpers/fix-android-cleartext')('capacitor')
-    }
   }
 
   async run (quasarConfFile) {
@@ -61,7 +58,7 @@ class CapacitorRunner {
 
     if (argv.ide === true) {
       await openIde('capacitor', cfg.bin, this.target)
-      process.exit(0)
+      return SIGNAL__BUILD_SHOULD_EXIT
     }
 
     if (this.target === 'ios') {
